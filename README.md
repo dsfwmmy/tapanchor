@@ -59,6 +59,30 @@ python -m tapanchor run flows/demo.yaml
 
 除 `pyyaml` 外无第三方依赖。
 
+### 两种跑法
+
+**接电脑**（最省事）：
+
+```bash
+adb connect <手机IP>:<无线调试端口>
+python -m tapanchor --serial <手机IP>:<端口> run flows/demo.yaml
+```
+
+**手机上本地跑**（不用插电脑，v0.3）：
+
+手机开无线调试后，在手机自己的终端里：
+
+```bash
+./run_local.sh doctor
+TA_PORT=41297 ./run_local.sh doctor     # 首次或重启后指定端口
+./run_local.sh run flows/demo.yaml      # 之后免输端口
+```
+
+原理是手机把自己当设备：本机 adb 连 `127.0.0.1:<端口>`，Python 直接驱动自己。
+端口是随机的且手机重启会变，成功连一次后记进 `.ta_port`。
+
+> 那个端口显示在「无线调试」页面上，而该页面是安全窗口（FLAG_SECURE），程序读不到，只能人看一眼。这是系统限制，绕不过去。
+
 ---
 
 ## YAML 怎么写
@@ -190,16 +214,18 @@ python -m tapanchor run flows/selfheal.yaml
 
 - **v0.1**（已完成）：YAML 执行 + 状态校验 + 降级链 + 失败留证。
 - **v0.2**（已完成）：选择器自愈闭环——失败现场 → 三候选 → 人工点选写回 → 下次优先复用。
-- **v0.3**：打包成 Android App，内置无障碍服务，脱离 adb 直接在手机上跑。这才是与 Maestro/midscene 拉开身位的地方。
-- **v0.4**：把 flow 暴露成 MCP/HTTP 接口，让 Claude / 本地 Agent 调用确定性动作——**做「点得准的手」，不做「大脑」**。
+- **v0.3**（已完成）：手机本地运行。手机把自己当设备，本机 adb 连自己，不用插电脑。
+- **v0.4**：打包成 Android App，无障碍服务内置，彻底不要 adb。这才是与 Maestro/midscene 拉开身位的地方。
+- **v0.5**：把 flow 暴露成 MCP/HTTP 接口，让 Claude / 本地 Agent 调用确定性动作——**做「点得准的手」，不做「大脑」**。
 
 ---
 
 ## 已知限制
 
 - 中文输入依赖 ADBKeyboard 或剪贴板通道，`input text` 只支持 ASCII
-- 需要 adb 与 USB/无线调试
-- 每个动作后要重新 dump 树，慢设备上单步可能 1–2 秒
+- 需要 adb；手机本地运行时依赖「无线调试」常开（会额外耗电）
+- 无线调试端口随机且重启会变，程序读不到那个页面（FLAG_SECURE），只能靠 `.ta_port` 缓存
+- 每个动作后要重新 dump 树，实测单步 2–8 秒
 - 不做并发、不做多设备编排
 
 ---
