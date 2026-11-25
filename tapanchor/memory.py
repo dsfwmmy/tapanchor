@@ -199,29 +199,67 @@ class Memory:
             node["bad"] += 1
         self.dirty = True
 
+    # ---------- 页面转移 ----------
+
+    def record_transition(self, from_pid, key, to_pid):
+        """记下：在 from_pid 做 key 这个动作，到达了 to_pid。"""
+        if not self.enabled or not from_pid or not to_pid:
+            return
+        t = self.data.setdefault("transitions", {}).setdefault(
+            from_pid, {}).setdefault(key, {})
+        t[to_pid] = t.get(to_pid, 0) + 1
+        self.dirty = True
+
+    def predict_next(self, from_pid, key):
+        """做完这个动作，通常到哪一页。置信度不够返回 None。"""
+        if not self.enabled or not from_pid:
+            return None
+        t = self.data.get("transitions", {}).get(from_pid, {}).get(key)
+        if not t:
+            return None
+        total = sum(t.values())
+        if total < MIN_SUPPORT:
+            return None
+        to_pid, cnt = max(t.items(), key=lambda kv: kv[1])
+        conf = cnt / total
+        if conf < MIN_CONFIDENCE:
+            return None
+        return {"to": to_pid, "confidence": round(conf, 3), "support": total}
+
     # ---------- 统计 ----------
 
     def stats(self):
         pages = self.data["pages"]
         actions = self.data["actions"]
+        transitions = self.data.get("transitions", {})
         pair_count = sum(len(v) for v in actions.values())
+        trans_count = sum(len(kv) for kv in transitions.values())
         learned = 0
         for pid, kv in actions.items():
             for key, rec in kv.items():
                 total = rec.get("ok", 0) + rec.get("bad", 0)
                 if total >= MIN_SUPPORT and rec.get("ok", 0) / max(total, 1) >= MIN_CONFIDENCE:
                     learned += 1
+        usable_trans = 0
+        for frm, kv in transitions.items():
+            for key, tos in kv.items():
+                tot = sum(tos.values())
+                if tot >= MIN_SUPPORT and max(tos.values()) / tot >= MIN_CONFIDENCE:
+                    usable_trans += 1
         return {
             "pages": len(pages),
             "page_actions": pair_count,
             "usable_memories": learned,
+            "transitions": trans_count,
+            "usable_transitions": usable_trans,
         }
 
     def describe(self):
         lines = []
         st = self.stats()
-        lines.append("页面 %d 个 · 动作组合 %d 个 · 已可用的记忆 %d 条"
-                     % (st["pages"], st["page_actions"], st["usable_memories"]))
+        lines.append("页面 %d 个 · 动作组合 %d 个 · 可用记忆 %d 条 · 转移 %d 条（可用 %d）"
+                     % (st["pages"], st["page_actions"], st["usable_memories"],
+                        st["transitions"], st["usable_transitions"]))
         if not self.data["pages"]:
             lines.append("（还没积累，多跑几次 flow 就有了）")
             return "\n".join(lines)
@@ -238,4 +276,13 @@ class Memory:
                 lines.append("      %s %-24s 成功 %d / 失败 %d  置信 %.2f%s"
                              % (mark, key, ok, bad, conf,
                                 ("  期望 " + json.dumps(exp, ensure_ascii=False)) if exp else ""))
+                # 这一页做这个动作之后到哪去了
+                tos = self.data.get("transitions", {}).get(pid, {}).get(key)
+                if tos:
+                    tot = sum(tos.values())
+                    for to_pid, cnt in sorted(tos.items(), key=lambda kv: -kv[1]):
+                        usable = tot >= MIN_SUPPORT and cnt / tot >= MIN_CONFIDENCE
+                        lines.append("          → %s  %d/%d  置信 %.2f%s"
+                                     % (to_pid, cnt, tot, cnt / tot,
+                                        "" if usable else "  (样本不足)"))
         return "\n".join(lines)

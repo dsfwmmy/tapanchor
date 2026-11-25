@@ -121,5 +121,79 @@ class TestRunnerLearns(unittest.TestCase):
         self.assertNotIn("记忆中这个动作通常导致", "\n".join(r.log_lines))
 
 
+class TestTransition(unittest.TestCase):
+    def setUp(self):
+        self.path = os.path.join(tempfile.mkdtemp(), "memory.json")
+        self.m = mem.Memory(self.path)
+
+    def test_record_and_predict(self):
+        for _ in range(3):
+            self.m.record_transition("P1", "tap:登录", "P2")
+        got = self.m.predict_next("P1", "tap:登录")
+        self.assertIsNotNone(got)
+        self.assertEqual(got["to"], "P2")
+        self.assertEqual(got["support"], 3)
+
+    def test_no_prediction_without_support(self):
+        self.m.record_transition("P1", "tap:x", "P2")
+        self.assertIsNone(self.m.predict_next("P1", "tap:x"), "样本不足不该预测")
+
+    def test_ambiguous_targets_suppressed(self):
+        for _ in range(3):
+            self.m.record_transition("P1", "tap:x", "P2")
+        for _ in range(3):
+            self.m.record_transition("P1", "tap:x", "P3")
+        self.assertIsNone(self.m.predict_next("P1", "tap:x"), "去向五五开时不该硬猜")
+
+
+class TestPredictionSavesDump(unittest.TestCase):
+    """预判命中时应该少抓一次树——这是速度收益的来源。"""
+
+    def test_dump_count_drops(self):
+        mpath = os.path.join(tempfile.mkdtemp(), "memory.json")
+        base = None
+        for _ in range(3):
+            fake = FakeAdb([PAGE_LOGIN, PAGE_HOME], advance_after=1)
+            r = Runner(fake, settle=0, outdir=tempfile.mkdtemp(), verbose=False,
+                       memory_path=mpath, selectors_path=os.path.join(tempfile.mkdtemp(), "s.json"))
+            r.dumps = 0
+            r.run_step({"tap": "登录", "verify": {"text_exists": "首页"}}, 1)
+            r.memory.save()
+            base = r.dumps
+        self.assertEqual(base, 2, "写了 verify 时必须抓两次树（动作前后各一次）")
+
+        # 第四步不写 verify，预判应当接管
+        fake = FakeAdb([PAGE_LOGIN, PAGE_HOME], advance_after=1)
+        r = Runner(fake, settle=0, outdir=tempfile.mkdtemp(), verbose=False,
+                   memory_path=mpath, selectors_path=os.path.join(tempfile.mkdtemp(), "s.json"))
+        r.dumps = 0
+        ok = r.run_step({"tap": "登录"}, 1)
+        self.assertTrue(ok)
+        self.assertEqual(r.dumps, 1, "预判命中时应只抓动作前那一次树")
+        self.assertIsNotNone(r._pending, "验证应被推到下一步")
+
+    def test_prediction_failure_is_caught(self):
+        mpath = os.path.join(tempfile.mkdtemp(), "memory.json")
+        for _ in range(3):
+            fake = FakeAdb([PAGE_LOGIN, PAGE_HOME], advance_after=1)
+            r = Runner(fake, settle=0, outdir=tempfile.mkdtemp(), verbose=False,
+                       memory_path=mpath, selectors_path=os.path.join(tempfile.mkdtemp(), "s.json"))
+            r.run_step({"tap": "登录", "verify": {"text_exists": "首页"}}, 1)
+            r.memory.save()
+
+        # 这次点了没生效，停在原页：下一步开头必须发现「预测失败」
+        fake = FakeAdb([PAGE_LOGIN, PAGE_LOGIN], advance_after=99)
+        r = Runner(fake, settle=0, outdir=tempfile.mkdtemp(), verbose=False,
+                   memory_path=mpath, selectors_path=os.path.join(tempfile.mkdtemp(), "s.json"))
+        r.run_step({"tap": "登录"}, 1)
+        try:
+            # 这一步本身也会因为界面没变而失败，但它开头就会先检查上一步的预测
+            r.run_step({"key": 4}, 2)
+        except Exception:
+            pass
+        joined = "\n".join(r.log_lines)
+        self.assertIn("预测失败", joined, "动作没生效时，下一步开头必须报出来")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -41,6 +41,9 @@ class Runner:
         self.selectors_path = selectors_path
         self.db = heal.load_db(selectors_path)
         self.memory = mem_mod.Memory(memory_path, enabled=use_memory)
+        # 上一步的预测在这里等着被验证：{"expect": pid, "from": pid, "key": akey, "conf": x}
+        self._pending = None
+        self.dumps = 0
 
     # ---------- 基础设施 ----------
 
@@ -51,6 +54,7 @@ class Runner:
             print(line, flush=True)
 
     def snapshot(self):
+        self.dumps += 1
         return Tree.parse(self.adb.dump_xml())
 
     def ensure_run_dir(self):
@@ -180,6 +184,17 @@ class Runner:
         if page_id:
             self.log("  页面 %s（相似度 %.2f）" % (page_id, page_sim))
 
+        # 上一步的预测在这里兑现——一次 dump 同时干三件事：
+        # 验证上一步到没到预期页面、识别当前页面、学习新的页面转移
+        if self._pending:
+            p = self._pending
+            self._pending = None
+            self.memory.record_transition(p["from"], p["key"], page_id)
+            if page_id == p["expect"]:
+                self.log("  上一步预测正确：到了 %s（省掉一次 dump）" % page_id)
+            else:
+                self.log("  ⚠ 上一步预测失败：预期 %s，实际 %s" % (p["expect"], page_id))
+
         if name in ("wait", "sleep"):
             time.sleep(float(step.get(name, 1)))
             after = self.snapshot()
@@ -209,6 +224,14 @@ class Runner:
             self.log("  记忆中这个动作通常导致：%s（置信 %.2f · 样本 %d）"
                      % (json.dumps(mem["expect"], ensure_ascii=False),
                         mem["confidence"], mem["support"]))
+
+        # 预判：做完这个动作通常会到哪一页。命中就能省一次 dump。
+        predict = None
+        if name in ("tap", "app", "key"):
+            predict = self.memory.predict_next(page_id, akey)
+            if predict:
+                self.log("  预判这一步会到 %s（置信 %.2f · 样本 %d）"
+                         % (predict["to"], predict["confidence"], predict["support"]))
 
         last_detail = ""
         last_changed = None
@@ -253,6 +276,15 @@ class Runner:
                 self.log("  打法 %s 找不到目标" % strategy)
                 continue
 
+            # 预判命中且没写显式验收：不 dump，把验证推到下一步开头
+            if predict and not step.get("verify"):
+                self._pending = {"expect": predict["to"], "from": page_id,
+                                 "key": akey, "conf": predict["confidence"]}
+                self.memory.record(page_id, akey, True)
+                self.log("  跳过本次 dump（预判将到 %s，置信 %.2f）"
+                         % (predict["to"], predict["confidence"]))
+                return True
+
             after = self.snapshot()
             changed_now = after.signature() != before_sig
             last_changed = changed_now
@@ -263,6 +295,10 @@ class Runner:
             last_detail = detail
             if ok:
                 self.memory.record(page_id, akey, True, expect=spec, changed=changed_now)
+                # 动作后的页面可能从没注册过，必须 register 而不是 identify
+                to_pid, _ = self.memory.register_page(mem_mod.page_signature(after))
+                if to_pid:
+                    self.memory.record_transition(page_id, akey, to_pid)
                 self.log("  OK  (%s) %s" % (strategy, detail))
                 return True
             self.log("  打法 %s 动作已发出%s" % (strategy, "但界面没变" if not changed_now else "且界面变了，但验收不通过"))
@@ -305,12 +341,25 @@ class Runner:
                     break
         total = len(steps)
         okn = total - len(failed)
+
+        # 最后一步设了预判但没被下一步兑现：补一次验证
+        if self._pending:
+            p = self._pending
+            self._pending = None
+            tree = self.snapshot()
+            pid, _ = self.memory.register_page(mem_mod.page_signature(tree))
+            self.memory.record_transition(p["from"], p["key"], pid)
+            if pid == p["expect"]:
+                self.log("最后一步预测正确：%s" % pid)
+            else:
+                self.log("⚠ 最后一步预测失败：预期 %s，实际 %s" % (p["expect"], pid))
+
         saved = self.memory.save()
         if saved:
             st = self.memory.stats()
             self.log("记忆已更新：%s（页面 %d · 可用记忆 %d 条）"
                      % (saved, st["pages"], st["usable_memories"]))
-        self.log("—— 结束：%d/%d 步通过 ——" % (okn, total))
+        self.log("—— 结束：%d/%d 步通过（共 dump %d 次）——" % (okn, total, self.dumps))
         return {"ok": not failed, "passed": okn, "total": total,
                 "failed": failed, "run_dir": self.run_dir,
                 "log": self.log_lines}

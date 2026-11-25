@@ -514,9 +514,35 @@
     ]
    ],
    "hint": "登录",
-   "seen": 10,
+   "seen": 30,
    "first": "2026-11-25 11:45",
-   "last": "2026-11-25 11:47"
+   "last": "2026-11-25 11:59"
+  },
+  "P5": {
+   "sig": [
+    [
+     "FrameLayout",
+     false,
+     0,
+     0
+    ],
+    [
+     "TextView",
+     false,
+     0,
+     0
+    ],
+    [
+     "TextView",
+     false,
+     5,
+     0
+    ]
+   ],
+   "hint": "",
+   "seen": 9,
+   "first": "2026-11-25 11:59",
+   "last": "2026-11-25 11:59"
   }
  },
  "actions": {
@@ -561,21 +587,31 @@
   },
   "P4": {
    "tap:登录": {
-    "ok": 4,
-    "bad": 2,
+    "ok": 12,
+    "bad": 6,
     "expect": {
      "text_exists": "首页"
     },
-    "changed_false": 2,
-    "changed_true": 4
+    "changed_false": 6,
+    "changed_true": 11
    },
    "tap:登入": {
-    "ok": 2,
-    "bad": 2,
+    "ok": 6,
+    "bad": 6,
     "expect": {
      "text_exists": "首页"
     },
-    "changed_true": 2
+    "changed_true": 6
+   }
+  }
+ },
+ "transitions": {
+  "P4": {
+   "tap:登录": {
+    "P5": 6
+   },
+   "tap:登入": {
+    "P5": 3
    }
   }
  }
