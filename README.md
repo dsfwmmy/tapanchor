@@ -30,7 +30,7 @@ TapAnchor 只做一件事：**每个动作都有验收条件，验收不过就�
 **是**：一个 Python + adb 的执行内核。声明式 YAML 描述流程，运行时做状态校验与降级重试。
 
 **不是**：
-- 不是 Android App（v0.3 才打包，当前必须连 adb）
+- 不是 Android App —— 当前形态是 Python 内核（可接电脑，也可在手机本地跑，见下文 v0.3）
 - 不是 AI Agent（不做自然语言规划，那层有阿里 Mobile-Agent、droidrun 在做）
 - 不是云真机平台（不做并发与设备编排）
 
@@ -154,13 +154,15 @@ steps:
 
 ```
 tapanchor/
-  adb.py      # 只负责发命令、拿界面
+  adb.py      # 只负责发命令、拿界面（adb 路径靠 TA_ADB 或 PATH 探测）
   tree.py     # 脏树清洗：非法 bounds、同框父子合并、空容器、稳定标识
   verify.py   # 状态断言
   runner.py   # 动作 + 验收 + 降级链（核心）
-  cli.py      # doctor / dump / run
+  heal.py     # 选择器自愈：现场候选打分 + 选择器库
+  cli.py      # doctor / dump / run / heal
 tests/
-  test_core.py  # 11 个离线测试，不需要真机
+  test_core.py  # 12 个：清洗、断言、降级链
+  test_heal.py  # 6 个：候选、库往返、自愈闭环
 ```
 
 `tree.py` 的清洗规则值得单独说，因为它是稳定查找的前提：
@@ -175,10 +177,10 @@ tests/
 ## 测试
 
 ```bash
-python -m unittest tests.test_core -v
+python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-11 个测试全部离线运行，覆盖：脏树清洗、自绘控件回溯、状态断言、**以及最关键的——「第一下点了没生效、第二下才生效」时，框架能不能自动换打法并最终通过**。
+18 个测试全部离线运行，不需要真机。覆盖：脏树清洗、自绘控件回溯、状态断言、**以及最关键的——「第一下点了没生效、第二下才生效」时框架能不能自动换打法并最终通过**；自愈部分覆盖候选打分、库往返、以及完整的「失败 → 候选 → 写回 → 一次通过」闭环。
 
 ---
 
@@ -232,4 +234,4 @@ python -m tapanchor run flows/selfheal.yaml
 
 ## License
 
-MIT
+[MIT](LICENSE)
