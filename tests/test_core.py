@@ -118,6 +118,14 @@ class TestVerify(unittest.TestCase):
         ok, _ = evaluate(Tree.parse(PAGE_HOME), {"changed": False}, b)
         self.assertTrue(ok)
 
+    def test_any_text_is_at_least_one(self):
+        # any_text 的语义是「至少出现一个」，不是「全部都要出现」
+        t = Tree.parse(PAGE_HOME)
+        ok, detail = evaluate(t, {"any_text": ["首页", "不存在的词"]})
+        self.assertTrue(ok, "只要命中一个就算过: %s" % detail)
+        ok, _ = evaluate(t, {"any_text": ["甲", "乙"]})
+        self.assertFalse(ok)
+
     def test_count(self):
         t = Tree.parse(PAGE_HOME)
         ok, _ = evaluate(t, {"count": {"text": "首页", "min": 1, "max": 2}})

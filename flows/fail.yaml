@@ -1,0 +1,6 @@
+name: 故意失败 - 验证降级链与留证
+steps:
+  - name: 点一个绝对不存在的按钮
+    tap: "这个按钮绝对不存在XYZ"
+    verify:
+      text_exists: "绝对不会出现的文字"

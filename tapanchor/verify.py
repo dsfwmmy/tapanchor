@@ -30,8 +30,10 @@ def evaluate(tree, spec, before=None):
     for want in _as_list(spec.get("text_gone")):
         checks.append((want not in texts, "text_gone %r" % want))
 
-    for want in _as_list(spec.get("any_text")):
-        checks.append((want in texts, "any_text %r" % want))
+    any_list = _as_list(spec.get("any_text"))
+    if any_list:
+        hit = [w for w in any_list if w in texts]
+        checks.append((bool(hit), "any_text %r -> %r" % (any_list, hit)))
 
     if "pkg" in spec:
         pkg = spec["pkg"]
