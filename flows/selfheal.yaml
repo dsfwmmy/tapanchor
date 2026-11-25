@@ -1,0 +1,18 @@
+# 自愈演示：文案差一个字（真实世界里 App 改文案就是这种形态）
+# 第一次跑会失败并产出候选，heal --pick 写回后，第二次一步到位
+name: 自愈演示 - 显示和亮度
+steps:
+  - name: 回桌面
+    key: 3
+    verify:
+      changed: true
+
+  - name: 打开设置
+    app: com.android.settings
+    verify:
+      pkg: com.android.settings
+
+  - name: 点「显示和亮度」（实际叫「显示与亮度」）
+    tap: "显示和亮度"
+    verify:
+      changed: true

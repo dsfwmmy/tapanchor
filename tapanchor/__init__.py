@@ -9,6 +9,7 @@ from .adb import Adb, AdbError
 from .tree import Tree, Node
 from .runner import Runner, StepFailed
 from .verify import evaluate
+from . import heal
 
 __all__ = ["Adb", "AdbError", "Tree", "Node", "Runner", "StepFailed",
-           "evaluate", "__version__"]
+           "evaluate", "heal", "__version__"]

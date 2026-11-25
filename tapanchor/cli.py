@@ -61,13 +61,48 @@ def cmd_run(args):
     if not steps:
         sys.exit("flow 里没有 steps")
     adb = Adb(serial=args.serial)
-    r = Runner(adb, settle=args.settle, outdir=args.outdir)
+    flow_name = os.path.basename(args.flow)
+    r = Runner(adb, settle=args.settle, outdir=args.outdir,
+               flow_name=flow_name, selectors_path=args.selectors)
     result = r.run(steps, keep_going=args.keep_going)
     if args.json_out:
         with open(args.json_out, "w", encoding="utf-8") as f:
             json.dump({k: v for k, v in result.items() if k != "log"},
                       f, ensure_ascii=False, indent=1)
     return 0 if result["ok"] else 2
+
+
+def cmd_heal(args):
+    from . import heal as hmod
+    target = args.run_dir
+    if target == "last":
+        runs = sorted(d for d in os.listdir(args.outdir)
+                      if os.path.isdir(os.path.join(args.outdir, d)))
+        if not runs:
+            sys.exit("runs 目录里没有记录")
+        target = os.path.join(args.outdir, runs[-1])
+    hp = os.path.join(target, "heal.json")
+    if not os.path.exists(hp):
+        sys.exit("没找到 %s —— 只有点按类步骤失败时才会生成候选" % hp)
+    with open(hp, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+
+    print(hmod.render_candidates(payload))
+    if args.pick is None:
+        return 0
+
+    cands = payload.get("candidates", [])
+    if not (1 <= args.pick <= len(cands)):
+        sys.exit("--pick 只能是 1..%d" % len(cands))
+    chosen = cands[args.pick - 1]
+    db = hmod.load_db(args.selectors)
+    hmod.set_learned(db, payload["flow"], payload["step"], chosen["selector"])
+    hmod.save_db(db, args.selectors)
+    print("已写回 %s：%s → %s=%r"
+          % (args.selectors, payload["step"],
+             chosen["selector"]["kind"], chosen["selector"]["value"]))
+    print("下次跑 %s 时，这一步会先用学到的定位。" % payload["flow"])
+    return 0
 
 
 def main(argv=None):
@@ -86,9 +121,17 @@ def main(argv=None):
     ru.add_argument("flow")
     ru.add_argument("--settle", type=float, default=0.9)
     ru.add_argument("--outdir", default="runs")
+    ru.add_argument("--selectors", default="selectors.json")
     ru.add_argument("--keep-going", action="store_true")
     ru.add_argument("--json-out", default=None)
     ru.set_defaults(func=cmd_run)
+
+    he = sub.add_parser("heal", help="看失败现场的候选目标，并把选中的写回选择器库")
+    he.add_argument("run_dir", help="runs/<时间戳> 或 last")
+    he.add_argument("--pick", type=int, default=None, help="选第几个候选写回")
+    he.add_argument("--outdir", default="runs")
+    he.add_argument("--selectors", default="selectors.json")
+    he.set_defaults(func=cmd_heal)
 
     a = p.parse_args(argv)
     try:

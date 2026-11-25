@@ -7,6 +7,7 @@
 import os
 import time
 
+from . import heal
 from .adb import AdbError
 from .tree import Tree
 from .verify import evaluate
@@ -26,13 +27,17 @@ def _pick_default_verify(action_name):
 
 
 class Runner:
-    def __init__(self, adb, settle=SETTLE, outdir="runs", verbose=True):
+    def __init__(self, adb, settle=SETTLE, outdir="runs", verbose=True,
+                 flow_name=None, selectors_path=heal.DB_DEFAULT):
         self.adb = adb
         self.settle = settle
         self.outdir = outdir
         self.verbose = verbose
         self.run_dir = None
         self.log_lines = []
+        self.flow_name = flow_name
+        self.selectors_path = selectors_path
+        self.db = heal.load_db(selectors_path)
 
     # ---------- 基础设施 ----------
 
@@ -103,6 +108,22 @@ class Runner:
 
     def _do_tap(self, strategy, step, tree):
         """执行一种打法，返回是否把动作发出去了。"""
+        if strategy == "learned":
+            sel = step.get("_learned")
+            if not sel or sel.get("kind") not in ("text", "desc", "rid", "cls"):
+                return False
+            nodes = tree.find(**{sel["kind"]: sel["value"]})
+            if not nodes:
+                return False
+            tgt = nodes[0].clickable_ancestor() or nodes[0]
+            if not tgt.center:
+                return False
+            x, y = tgt.center
+            self.log("  学到的定位 %s=%r @(%d,%d)" % (sel["kind"], sel["value"], x, y))
+            self.adb.tap(x, y)
+            time.sleep(self.settle)
+            return True
+
         if strategy == "xy":
             xy = step.get("xy") or []
             if len(xy) != 2:
@@ -144,6 +165,7 @@ class Runner:
             raise StepFailed("第 %d 步没有可识别的动作: %r" % (index, step))
 
         label = step.get("name") or str(step.get("tap") or step.get("assert") or name)
+        step_key_id = heal.step_key(index, label)
         self.log("step %d · %s · %s" % (index, name, label))
 
         before_tree = self.snapshot()
@@ -163,6 +185,13 @@ class Runner:
 
         targets = step.get("fallback") or (["primary", "longpress", "xy"]
                                            if "xy" in step else ["primary", "longpress"])
+
+        # 之前有人点选过「这一步该用哪个选择器」，就把它排在最前面
+        learned = heal.get_learned(self.db, self.flow_name, step_key_id)
+        if learned:
+            step["_learned"] = learned
+            targets = ["learned"] + [t for t in targets if t != "learned"]
+            self.log("  库里有学到的定位：%s=%r" % (learned["kind"], learned["value"]))
 
         last_detail = ""
         for strategy in targets:
@@ -215,13 +244,28 @@ class Runner:
                 return True
             self.log("  打法 %s 动作已发出但界面没变" % strategy)
 
+        # 全部打法都没让界面变化：先算「现场里最像的 3 个目标」，再留证
+        if name == "tap":
+            want = step.get("tap") or step.get("text_target")
+            cands = heal.candidates(before_tree, want)
+            if cands:
+                hp, payload = heal.write_heal_file(
+                    self.ensure_run_dir(), self.flow_name, step_key_id, want, cands)
+                self.log("  现场候选 %d 个 → %s" % (len(cands), hp))
+                for c in payload["candidates"]:
+                    self.log("    [%d] %s=%r 相似度 %.2f bounds=%s"
+                             % (c["pick"], c["selector"]["kind"],
+                                c["selector"]["value"], c["score"], c["bounds"]))
+
         png, xml = self.save_evidence("fail-step%d-%s" % (index, label))
         self.log("  FAIL 全部打法用尽 · 证据: %s" % (png or xml))
         raise StepFailed("第 %d 步「%s」全部打法失败 · 校验: %s" % (index, label, last_detail))
 
     # ---------- flow ----------
 
-    def run(self, steps, keep_going=False):
+    def run(self, steps, keep_going=False, flow_name=None):
+        if flow_name:
+            self.flow_name = flow_name
         failed = []
         for i, step in enumerate(steps, 1):
             try:
