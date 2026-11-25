@@ -3,14 +3,32 @@
 """
 import os
 import re
+import shutil
 import subprocess
 
-CANDIDATES = [
-    r"C:\Users\chenactivity\platform-tools\adb.exe",
-    r"C:\Users\chenactivity\lzs\platform-tools\adb.exe",
-    r"C:\Users\chenactivity\lzs\pt34\platform-tools\adb.exe",
-    "adb",
-]
+# 找 adb 的顺序：环境变量 → PATH → 常见 SDK 位置 → 交给系统
+# 这里不放任何写死的用户目录，避免把本机路径带进仓库
+COMMON_PATHS = (
+    os.path.expandvars(r"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe"),
+    os.path.expandvars(r"%PROGRAMFILES%\Android\android-sdk\platform-tools\adb.exe"),
+    "/usr/lib/android-sdk/platform-tools/adb",
+    "/usr/bin/adb",
+    "/opt/homebrew/bin/adb",
+)
+
+
+def find_adb():
+    env = os.environ.get("TA_ADB")
+    if env and os.path.exists(env):
+        return env
+    for name in ("adb", "adb.exe"):
+        p = shutil.which(name)
+        if p:
+            return p
+    for p in COMMON_PATHS:
+        if p and os.path.exists(p):
+            return p
+    return "adb"
 
 
 class AdbError(RuntimeError):
@@ -25,12 +43,7 @@ class Adb:
 
     @staticmethod
     def _find():
-        for c in CANDIDATES:
-            if c == "adb":
-                return c
-            if os.path.exists(c):
-                return c
-        return "adb"
+        return find_adb()
 
     def _base(self):
         b = [self.adb]
