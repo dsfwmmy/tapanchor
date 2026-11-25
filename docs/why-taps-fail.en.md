@@ -4,16 +4,24 @@
 
 ---
 
-Every automation framework has the same blind spot, and it's not the one you'd guess.
+The first time I hit this, I was automating a quiz app.
 
-Here's the log:
+The script was supposed to tap option A on a multiple-choice question. The node existed, the text was there, the bounds were sane, `click` returned success. The log was clean.
+
+Then it tapped "Next".
+
+When I submitted, the app told me there were unanswered questions. Twenty questions. Zero answers selected.
+
+The script hadn't crashed. **It thought it had succeeded.** The tile was custom-drawn, the tap got swallowed by the parent scroll container, and `performAction` still returned `true` — because the event was delivered, just never consumed. The script ran an entire exam on screen state that didn't exist.
+
+There's a milder version of the same thing. You write a script: open settings, tap "Display & brightness", assert you're on the second page.
 
 ```
-tapOn: "Display"     ✓
-assertVisible: "Brightness"  ✓
+tapOn: "Display & brightness"   ✓
+assertVisible: "Brightness"     ✓
 ```
 
-And here's what actually happened: the tap landed on nothing. Or on a non-clickable container. Or the page was mid-transition and the tap got swallowed. The script walked three more steps on a screen that never existed, then crashed somewhere unrelated with an error that pointed at everything except the real cause.
+And nothing happened. The tap landed on nothing. Or on a non-clickable container. Or the page was mid-transition and the tap got swallowed. The script walked three more steps on a screen that never existed, then crashed somewhere unrelated with an error that pointed at everything except the real cause.
 
 The thing about this failure mode is that **it doesn't raise**.
 
