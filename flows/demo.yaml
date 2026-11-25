@@ -1,0 +1,23 @@
+# TapAnchor 冒烟测试
+# 目的：验证「动作 → 界面真的变了 → 变了才算过」这条主线
+# 跑法：python -m tapanchor run flows/demo.yaml
+name: 冒烟 - 桌面 / 设置 / 返回
+steps:
+  - name: 回桌面
+    key: 3
+    verify:
+      changed: true
+
+  - name: 打开系统设置
+    app: com.android.settings
+    verify:
+      pkg: com.android.settings
+
+  - name: 断言设置页有内容
+    assert:
+      any_text: ["搜索", "Search", "设置", "Settings"]
+
+  - name: 按返回键
+    key: 4
+    verify:
+      changed: true
