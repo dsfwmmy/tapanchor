@@ -55,6 +55,13 @@ def cmd_dump(args):
     return 0
 
 
+def cmd_memory(args):
+    from . import memory as mmod
+    mem = mmod.Memory(args.memory)
+    print(mem.describe())
+    return 0
+
+
 def cmd_run(args):
     data = _load_yaml(args.flow)
     steps = data.get("steps", data if isinstance(data, list) else [])
@@ -63,7 +70,8 @@ def cmd_run(args):
     adb = Adb(serial=args.serial)
     flow_name = os.path.basename(args.flow)
     r = Runner(adb, settle=args.settle, outdir=args.outdir,
-               flow_name=flow_name, selectors_path=args.selectors)
+               flow_name=flow_name, selectors_path=args.selectors,
+               memory_path=args.memory, use_memory=not args.no_memory)
     result = r.run(steps, keep_going=args.keep_going)
     if args.json_out:
         with open(args.json_out, "w", encoding="utf-8") as f:
@@ -122,9 +130,15 @@ def main(argv=None):
     ru.add_argument("--settle", type=float, default=0.9)
     ru.add_argument("--outdir", default="runs")
     ru.add_argument("--selectors", default="selectors.json")
+    ru.add_argument("--memory", default="memory.json")
+    ru.add_argument("--no-memory", action="store_true", help="只用当期识别，不读也不写记忆")
     ru.add_argument("--keep-going", action="store_true")
     ru.add_argument("--json-out", default=None)
     ru.set_defaults(func=cmd_run)
+
+    me = sub.add_parser("memory", help="看积累下来的页面与动作记忆")
+    me.add_argument("--memory", default="memory.json")
+    me.set_defaults(func=cmd_memory)
 
     he = sub.add_parser("heal", help="看失败现场的候选目标，并把选中的写回选择器库")
     he.add_argument("run_dir", help="runs/<时间戳> 或 last")

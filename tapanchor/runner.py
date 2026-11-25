@@ -4,10 +4,11 @@
 核心规矩：
   动作发出去了不算成功，界面没变就是失败，失败就换下一种打法，全打完还不行才报错并留证。
 """
+import json
 import os
 import time
 
-from . import heal
+from . import heal, memory as mem_mod
 from .adb import AdbError
 from .tree import Tree
 from .verify import evaluate
@@ -28,7 +29,8 @@ def _pick_default_verify(action_name):
 
 class Runner:
     def __init__(self, adb, settle=SETTLE, outdir="runs", verbose=True,
-                 flow_name=None, selectors_path=heal.DB_DEFAULT):
+                 flow_name=None, selectors_path=heal.DB_DEFAULT,
+                 memory_path=mem_mod.DB_DEFAULT, use_memory=True):
         self.adb = adb
         self.settle = settle
         self.outdir = outdir
@@ -38,6 +40,7 @@ class Runner:
         self.flow_name = flow_name
         self.selectors_path = selectors_path
         self.db = heal.load_db(selectors_path)
+        self.memory = mem_mod.Memory(memory_path, enabled=use_memory)
 
     # ---------- 基础设施 ----------
 
@@ -171,6 +174,12 @@ class Runner:
         before_tree = self.snapshot()
         before_sig = before_tree.signature()
 
+        # 认页面：这是哪一页？认出来，才能谈「这一页上的动作通常会发生什么」
+        sig_now = mem_mod.page_signature(before_tree)
+        page_id, page_sim = self.memory.register_page(sig_now, hint=label)
+        if page_id:
+            self.log("  页面 %s（相似度 %.2f）" % (page_id, page_sim))
+
         if name in ("wait", "sleep"):
             time.sleep(float(step.get(name, 1)))
             after = self.snapshot()
@@ -193,7 +202,16 @@ class Runner:
             targets = ["learned"] + [t for t in targets if t != "learned"]
             self.log("  库里有学到的定位：%s=%r" % (learned["kind"], learned["value"]))
 
+        # 查记忆：在这一页做这个动作，历史上通常导致什么
+        akey = mem_mod.action_key(step)
+        mem = self.memory.expected(page_id, akey)
+        if mem:
+            self.log("  记忆中这个动作通常导致：%s（置信 %.2f · 样本 %d）"
+                     % (json.dumps(mem["expect"], ensure_ascii=False),
+                        mem["confidence"], mem["support"]))
+
         last_detail = ""
+        last_changed = None
         for strategy in targets:
             try:
                 if name == "tap":
@@ -236,13 +254,21 @@ class Runner:
                 continue
 
             after = self.snapshot()
-            spec = step.get("verify") or _pick_default_verify(name)
+            changed_now = after.signature() != before_sig
+            last_changed = changed_now
+            spec = (step.get("verify")
+                    or (mem["expect"] if mem else None)
+                    or _pick_default_verify(name))
             ok, detail = evaluate(after, spec, before_sig)
             last_detail = detail
             if ok:
+                self.memory.record(page_id, akey, True, expect=spec, changed=changed_now)
                 self.log("  OK  (%s) %s" % (strategy, detail))
                 return True
-            self.log("  打法 %s 动作已发出但界面没变" % strategy)
+            self.log("  打法 %s 动作已发出%s" % (strategy, "但界面没变" if not changed_now else "且界面变了，但验收不通过"))
+
+        # 这一页上这个动作从来没成功过，降一次置信度（同时记下界面到底变没变）
+        self.memory.record(page_id, akey, False, changed=last_changed)
 
         # 全部打法都没让界面变化：先算「现场里最像的 3 个目标」，再留证
         if name == "tap":
@@ -279,6 +305,11 @@ class Runner:
                     break
         total = len(steps)
         okn = total - len(failed)
+        saved = self.memory.save()
+        if saved:
+            st = self.memory.stats()
+            self.log("记忆已更新：%s（页面 %d · 可用记忆 %d 条）"
+                     % (saved, st["pages"], st["usable_memories"]))
         self.log("—— 结束：%d/%d 步通过 ——" % (okn, total))
         return {"ok": not failed, "passed": okn, "total": total,
                 "failed": failed, "run_dir": self.run_dir,

@@ -3,10 +3,9 @@
 # 跑法：python -m tapanchor run flows/demo.yaml
 name: 冒烟 - 桌面 / 设置 / 返回
 steps:
+  # 这一步故意不写 verify：让记忆来决定「回桌面」在这台设备上该不该有变化
   - name: 回桌面
     key: 3
-    verify:
-      changed: true
 
   - name: 打开系统设置
     app: com.android.settings
